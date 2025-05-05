@@ -1,0 +1,63 @@
+import express from "express";
+import multer from "multer";
+import ffmpeg from "fluent-ffmpeg";
+import fs from "fs";
+import path from "path";
+import { createClient } from "@supabase/supabase-js";
+
+const app = express();
+const upload = multer({ dest: "uploads/" });
+
+const SUPABASE_URL = "https://fswltwclbpssyknonlze.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZzd2x0d2NsYnBzc3lrbm9ubHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQwNTQyMTYsImV4cCI6MjA1OTYzMDIxNn0.t2BRUroJtqTISsJvNmFRnL6aurwxsm9xtXAoO3zvQqk";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+app.post("/segment", upload.single("video"), async (req, res) => {
+  const { segmentDuration = 120, supabasePathPrefix = "" } = req.body;
+  const file = req.file;
+  if (!file) return res.status(400).json({ error: "No file uploaded" });
+
+  const segmentsDir = `segments_${Date.now()}`;
+  fs.mkdirSync(segmentsDir);
+
+  // Découpage avec ffmpeg
+  await new Promise((resolve, reject) => {
+    ffmpeg(file.path)
+      .output(`${segmentsDir}/segment_%03d.webm`)
+      .outputOptions([
+        "-c copy",
+        "-map 0",
+        "-f segment",
+        `-segment_time ${segmentDuration}`
+      ])
+      .on("end", resolve)
+      .on("error", reject)
+      .run();
+  });
+
+  // Upload des segments sur Supabase
+  const segmentFiles = fs.readdirSync(segmentsDir).filter(f => f.endsWith(".webm"));
+  const uploadedSegments = [];
+  for (const seg of segmentFiles) {
+    const segPath = path.join(segmentsDir, seg);
+    const supabasePath = `${supabasePathPrefix}/${seg}`;
+    const { error } = await supabase.storage.from("videos").upload(supabasePath, fs.createReadStream(segPath), {
+      contentType: "video/webm",
+      upsert: true
+    });
+    if (error) {
+      return res.status(500).json({ error: "Upload failed", detail: error.message });
+    }
+    uploadedSegments.push(supabasePath);
+  }
+
+  // Nettoyage
+  fs.rmSync(file.path, { force: true });
+  fs.rmSync(segmentsDir, { recursive: true, force: true });
+
+  res.json({ segments: uploadedSegments });
+});
+
+app.listen(3000, () => {
+  console.log("Video segmenter server running on port 3000");
+});
