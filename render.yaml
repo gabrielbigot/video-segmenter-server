@@ -4,5 +4,5 @@ services:
     env: node
     plan: free
     buildCommand: npm install
-    startCommand: "which ffmpeg && ffmpeg -version && npm start"
+    startCommand: "which ffmpeg || echo 'ffmpeg not found'; ffmpeg -version || echo 'ffmpeg version failed'; npm start"
     preDeploy: "apt-get update && apt-get install -y software-properties-common && add-apt-repository universe && apt-get update && apt-get install -y ffmpeg && ffmpeg -version"
