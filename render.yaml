@@ -5,4 +5,4 @@ services:
     plan: free
     buildCommand: npm install
     startCommand: npm start
-    preDeploy: "apt-get update && apt-get install -y ffmpeg"
+    preDeploy: "apt-get update && apt-get install -y software-properties-common && add-apt-repository universe && apt-get update && apt-get install -y ffmpeg && ffmpeg -version"
