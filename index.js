@@ -1,63 +1,133 @@
-import express from "express";
-import multer from "multer";
-import ffmpeg from "fluent-ffmpeg";
-import fs from "fs";
-import path from "path";
-import { createClient } from "@supabase/supabase-js";
+const express = require('express');
+const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
+const path = require('path');
+const fs = require('fs');
 
+// Initialisation d'Express
 const app = express();
-const upload = multer({ dest: "uploads/" });
+const port = 3000;
 
-const SUPABASE_URL = "https://fswltwclbpssyknonlze.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZzd2x0d2NsYnBzc3lrbm9ubHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQwNTQyMTYsImV4cCI6MjA1OTYzMDIxNn0.t2BRUroJtqTISsJvNmFRnL6aurwxsm9xtXAoO3zvQqk";
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+// Configurer Multer pour les téléversements
+// Les fichiers téléversés seront temporairement stockés dans le dossier 'uploads/'
+const upload = multer({ dest: 'uploads/' });
 
-app.post("/segment", upload.single("video"), async (req, res) => {
-  const { segmentDuration = 120, supabasePathPrefix = "" } = req.body;
-  const file = req.file;
-  if (!file) return res.status(400).json({ error: "No file uploaded" });
-
-  const segmentsDir = `segments_${Date.now()}`;
-  fs.mkdirSync(segmentsDir);
-
-  // Découpage avec ffmpeg
-  await new Promise((resolve, reject) => {
-    ffmpeg(file.path)
-      .output(`${segmentsDir}/segment_%03d.webm`)
-      .outputOptions([
-        "-c copy",
-        "-map 0",
-        "-f segment",
-        `-segment_time ${segmentDuration}`
-      ])
-      .on("end", resolve)
-      .on("error", reject)
-      .run();
-  });
-
-  // Upload des segments sur Supabase
-  const segmentFiles = fs.readdirSync(segmentsDir).filter(f => f.endsWith(".webm"));
-  const uploadedSegments = [];
-  for (const seg of segmentFiles) {
-    const segPath = path.join(segmentsDir, seg);
-    const supabasePath = `${supabasePathPrefix}/${seg}`;
-    const { error } = await supabase.storage.from("videos").upload(supabasePath, fs.createReadStream(segPath), {
-      contentType: "video/webm",
-      upsert: true
-    });
-    if (error) {
-      return res.status(500).json({ error: "Upload failed", detail: error.message });
-    }
-    uploadedSegments.push(supabasePath);
-  }
-
-  // Nettoyage
-  fs.rmSync(file.path, { force: true });
-  fs.rmSync(segmentsDir, { recursive: true, force: true });
-
-  res.json({ segments: uploadedSegments });
+// Configurer Cloudinary avec vos identifiants
+cloudinary.config({
+  cloud_name: 'dp2fccobt', // Remplacez par votre cloud_name
+  api_key: '195344359975223',       // Remplacez par votre api_key
+  api_secret: 'KGw7mkyr6MVo1jH2BLbcnISNqKU'  // Remplacez par votre api_secret
 });
 
-app.listen(3000, () => {
-  console.log("Video segmenter server running on port 3000");
+// Middleware pour servir les fichiers statiques (facultatif, pour un formulaire HTML)
+app.use(express.static('public'));
+
+// Route GET pour afficher un formulaire de téléversement (facultatif)
+app.get('/', (req, res) => {
+  res.send(`
+    <h1>Video Segmenter Server</h1>
+    <form action="/upload-and-process" method="post" enctype="multipart/form-data">
+      <label for="video">Choisissez une vidéo à segmenter :</label>
+      <input type="file" id="video" name="video" accept="video/*" required>
+      <button type="submit">Téléverser et Segmenter</button>
+    </form>
+  `);
+});
+
+// Route POST pour téléverser et segmenter une vidéo
+app.post('/upload-and-process', upload.single('video'), (req, res) => {
+  // Vérifier si un fichier a été téléversé
+  if (!req.file) {
+    return res.status(400).send('Aucune vidéo téléversée. Veuillez sélectionner un fichier.');
+  }
+
+  const videoPath = req.file.path;
+
+  // Téléverser la vidéo sur Cloudinary
+  cloudinary.uploader.upload(videoPath, { resource_type: 'video' }, (error, result) => {
+    // Supprimer le fichier temporaire après le téléversement
+    fs.unlink(videoPath, (err) => {
+      if (err) console.error('Erreur lors de la suppression du fichier temporaire :', err);
+    });
+
+    if (error) {
+      console.error('Erreur lors du téléversement sur Cloudinary :', error);
+      return res.status(500).send('Erreur lors du téléversement de la vidéo sur Cloudinary.');
+    }
+
+    console.log('Vidéo téléversée :', result.secure_url);
+    console.log('Public ID :', result.public_id);
+
+    // Segmenter la vidéo (par exemple, de 6,5 à 10 secondes)
+    const transformedUrl = cloudinary.url(result.public_id, {
+      resource_type: 'video',
+      start_offset: 6.5,  // Début à 6,5 secondes
+      end_offset: 10,     // Fin à 10 secondes
+      width: 640,         // Redimensionner à 640px de largeur
+      height: 360,        // Redimensionner à 360px de hauteur
+      crop: 'fill'        // Remplir l'espace (peut couper les bords si nécessaire)
+    });
+
+    console.log('URL de la vidéo segmentée :', transformedUrl);
+
+    // Répondre avec un lien vers la vidéo segmentée
+    res.send(`
+      <h1>Vidéo segmentée avec succès !</h1>
+      <p>URL de la vidéo segmentée : <a href="${transformedUrl}">${transformedUrl}</a></p>
+      <video controls>
+        <source src="${transformedUrl}" type="video/mp4">
+        Votre navigateur ne prend pas en charge la balise vidéo.
+      </video>
+      <p><a href="/">Retourner au formulaire</a></p>
+    `);
+  });
+});
+
+// Route GET pour traiter une vidéo statique (optionnel, pour tester avec un fichier local)
+app.get('/process-static-video', (req, res) => {
+  const staticVideoPath = path.join(__dirname, 'input.mp4'); // Chemin vers une vidéo statique
+
+  // Vérifier si le fichier existe
+  if (!fs.existsSync(staticVideoPath)) {
+    return res.status(404).send('Fichier vidéo statique (input.mp4) non trouvé. Assurez-vous qu\'il est dans le répertoire du projet.');
+  }
+
+  // Téléverser la vidéo statique sur Cloudinary
+  cloudinary.uploader.upload(staticVideoPath, { resource_type: 'video' }, (error, result) => {
+    if (error) {
+      console.error('Erreur lors du téléversement sur Cloudinary :', error);
+      return res.status(500).send('Erreur lors du téléversement de la vidéo statique sur Cloudinary.');
+    }
+
+    console.log('Vidéo statique téléversée :', result.secure_url);
+    console.log('Public ID :', result.public_id);
+
+    // Segmenter la vidéo
+    const transformedUrl = cloudinary.url(result.public_id, {
+      resource_type: 'video',
+      start_offset: 6.5,
+      end_offset: 10,
+      width: 640,
+      height: 360,
+      crop: 'fill'
+    });
+
+    console.log('URL de la vidéo segmentée :', transformedUrl);
+
+    // Répondre avec un lien vers la vidéo segmentée
+    res.send(`
+      <h1>Vidéo statique segmentée avec succès !</h1>
+      <p>URL de la vidéo segmentée : <a href="${transformedUrl}">${transformedUrl}</a></p>
+      <video controls>
+        <source src="${transformedUrl}" type="video/mp4">
+        Votre navigateur ne prend pas en charge la balise vidéo.
+      </video>
+      <p><a href="/">Retourner au formulaire</a></p>
+    `);
+  });
+});
+
+// Démarrer le serveur
+app.listen(port, () => {
+  console.log(`Serveur de segmentation vidéo exécuté sur le port ${port}`);
 });
