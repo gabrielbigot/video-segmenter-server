@@ -19,9 +19,9 @@ const upload = multer({ dest: 'uploads/' });
 
 // Configurer Cloudinary avec vos identifiants
 cloudinary.config({
-  cloud_name: 'votre_cloud_name', // Remplacez par votre cloud_name
-  api_key: 'votre_api_key',       // Remplacez par votre api_key
-  api_secret: 'votre_api_secret'  // Remplacez par votre api_secret
+  cloud_name: 'dp2fccobt', // Remplacez par votre cloud_name
+  api_key: '195344359975223',       // Remplacez par votre api_key
+  api_secret: 'KGw7mkyr6MVo1jH2BLbcnISNqKU'  // Remplacez par votre api_secret
 });
 
 // Middleware pour servir les fichiers statiques (facultatif, pour un formulaire HTML)
