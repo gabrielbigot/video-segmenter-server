@@ -1,22 +1,27 @@
-const express = require('express');
-const multer = require('multer');
-const cloudinary = require('cloudinary').v2;
-const path = require('path');
-const fs = require('fs');
+import express from 'express';
+import multer from 'multer';
+import { v2 as cloudinary } from 'cloudinary';
+import { join } from 'path';
+import { unlink } from 'fs/promises';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
 // Initialisation d'Express
 const app = express();
 const port = 3000;
 
+// Obtenir __dirname dans un environnement ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 // Configurer Multer pour les téléversements
-// Les fichiers téléversés seront temporairement stockés dans le dossier 'uploads/'
 const upload = multer({ dest: 'uploads/' });
 
 // Configurer Cloudinary avec vos identifiants
 cloudinary.config({
-  cloud_name: 'dp2fccobt', // Remplacez par votre cloud_name
-  api_key: '195344359975223',       // Remplacez par votre api_key
-  api_secret: 'KGw7mkyr6MVo1jH2BLbcnISNqKU'  // Remplacez par votre api_secret
+  cloud_name: 'votre_cloud_name', // Remplacez par votre cloud_name
+  api_key: 'votre_api_key',       // Remplacez par votre api_key
+  api_secret: 'votre_api_secret'  // Remplacez par votre api_secret
 });
 
 // Middleware pour servir les fichiers statiques (facultatif, pour un formulaire HTML)
@@ -35,7 +40,7 @@ app.get('/', (req, res) => {
 });
 
 // Route POST pour téléverser et segmenter une vidéo
-app.post('/upload-and-process', upload.single('video'), (req, res) => {
+app.post('/upload-and-process', upload.single('video'), async (req, res) => {
   // Vérifier si un fichier a été téléversé
   if (!req.file) {
     return res.status(400).send('Aucune vidéo téléversée. Veuillez sélectionner un fichier.');
@@ -43,17 +48,14 @@ app.post('/upload-and-process', upload.single('video'), (req, res) => {
 
   const videoPath = req.file.path;
 
-  // Téléverser la vidéo sur Cloudinary
-  cloudinary.uploader.upload(videoPath, { resource_type: 'video' }, (error, result) => {
-    // Supprimer le fichier temporaire après le téléversement
-    fs.unlink(videoPath, (err) => {
-      if (err) console.error('Erreur lors de la suppression du fichier temporaire :', err);
-    });
+  try {
+    // Téléverser la vidéo sur Cloudinary
+    const result = await cloudinary.uploader.upload(videoPath, { resource_type: 'video' });
 
-    if (error) {
-      console.error('Erreur lors du téléversement sur Cloudinary :', error);
-      return res.status(500).send('Erreur lors du téléversement de la vidéo sur Cloudinary.');
-    }
+    // Supprimer le fichier temporaire après le téléversement
+    await unlink(videoPath).catch((err) => {
+      console.error('Erreur lors de la suppression du fichier temporaire :', err);
+    });
 
     console.log('Vidéo téléversée :', result.secure_url);
     console.log('Public ID :', result.public_id);
@@ -80,24 +82,29 @@ app.post('/upload-and-process', upload.single('video'), (req, res) => {
       </video>
       <p><a href="/">Retourner au formulaire</a></p>
     `);
-  });
+  } catch (error) {
+    console.error('Erreur lors du téléversement sur Cloudinary :', error);
+    await unlink(videoPath).catch((err) => {
+      console.error('Erreur lors de la suppression du fichier temporaire :', err);
+    });
+    res.status(500).send('Erreur lors du téléversement de la vidéo sur Cloudinary.');
+  }
 });
 
 // Route GET pour traiter une vidéo statique (optionnel, pour tester avec un fichier local)
-app.get('/process-static-video', (req, res) => {
-  const staticVideoPath = path.join(__dirname, 'input.mp4'); // Chemin vers une vidéo statique
+app.get('/process-static-video', async (req, res) => {
+  const staticVideoPath = join(__dirname, 'input.mp4'); // Chemin vers une vidéo statique
 
   // Vérifier si le fichier existe
-  if (!fs.existsSync(staticVideoPath)) {
+  try {
+    await fs.access(staticVideoPath);
+  } catch (error) {
     return res.status(404).send('Fichier vidéo statique (input.mp4) non trouvé. Assurez-vous qu\'il est dans le répertoire du projet.');
   }
 
-  // Téléverser la vidéo statique sur Cloudinary
-  cloudinary.uploader.upload(staticVideoPath, { resource_type: 'video' }, (error, result) => {
-    if (error) {
-      console.error('Erreur lors du téléversement sur Cloudinary :', error);
-      return res.status(500).send('Erreur lors du téléversement de la vidéo statique sur Cloudinary.');
-    }
+  try {
+    // Téléverser la vidéo statique sur Cloudinary
+    const result = await cloudinary.uploader.upload(staticVideoPath, { resource_type: 'video' });
 
     console.log('Vidéo statique téléversée :', result.secure_url);
     console.log('Public ID :', result.public_id);
@@ -124,7 +131,10 @@ app.get('/process-static-video', (req, res) => {
       </video>
       <p><a href="/">Retourner au formulaire</a></p>
     `);
-  });
+  } catch (error) {
+    console.error('Erreur lors du téléversement sur Cloudinary :', error);
+    res.status(500).send('Erreur lors du téléversement de la vidéo statique sur Cloudinary.');
+  }
 });
 
 // Démarrer le serveur
